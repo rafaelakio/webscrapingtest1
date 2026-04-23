@@ -2,8 +2,7 @@
 Automação de navegação via Selenium.
 
 AJUSTES NECESSÁRIOS:
-  Antes de rodar, inspecione o HTML da aplicação (F12 no browser) e ajuste
-  os seletores marcados com "# AJUSTE" conforme os atributos reais dos elementos.
+  Seletores marcados com "# AJUSTE" devem ser conferidos com F12 no browser.
   Execute com SLOW_MO=1000 no .env para ver a automação em câmera lenta.
 """
 import json
@@ -16,27 +15,25 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.edge.service import Service as EdgeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select, WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait
 
-from config import APP_URL, AUTH_STATE_FILE, CHROMEDRIVER_PATH, SIGLA, SLOW_MO, BROWSER
+from config import APP_URL, AUTH_STATE_FILE, BROWSER, CHROMEDRIVER_PATH, SLOW_MO
 
-TIMEOUT = 15  # segundos para esperar elementos
+TIMEOUT = 15
 
 
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
-def _make_driver() -> webdriver.Chrome:
-    options = webdriver.ChromeOptions()
-    # options.add_argument("--headless=new")  # descomente para rodar sem janela
-    options.add_argument("--start-maximized")
-
+def _make_driver() -> webdriver.Chrome | webdriver.Edge:
     if BROWSER == "edge":
-        edge_options = webdriver.EdgeOptions()
-        edge_options.add_argument("--start-maximized")
-        return webdriver.Edge(service=EdgeService(), options=edge_options)
+        options = webdriver.EdgeOptions()
+        options.add_argument("--start-maximized")
+        return webdriver.Edge(service=EdgeService(), options=options)
 
+    options = webdriver.ChromeOptions()
+    options.add_argument("--start-maximized")
     driver_path = Path(CHROMEDRIVER_PATH)
     if not driver_path.exists():
         raise FileNotFoundError(
@@ -69,17 +66,17 @@ def _load_cookies(driver, path: str) -> None:
                 pass
 
 
-def _restore_or_login(driver) -> None:
+def _restore_or_login(driver, target_url: str) -> None:
     if Path(AUTH_STATE_FILE).exists():
         _load_cookies(driver, AUTH_STATE_FILE)
-        driver.get(APP_URL)
+        driver.get(target_url)
         _wait_page(driver)
         if not _is_login_page(driver.current_url):
             print("Sessão restaurada com sucesso.")
             return
         print("Sessão expirada. Necessário novo login.")
 
-    driver.get(APP_URL)
+    driver.get(target_url)
     _wait_page(driver)
 
     if _is_login_page(driver.current_url):
@@ -89,7 +86,7 @@ def _restore_or_login(driver) -> None:
         _wait_page(driver)
 
     _save_cookies(driver, AUTH_STATE_FILE)
-    print(f"Cookies salvos em '{AUTH_STATE_FILE}'.")
+    print(f"Cookies salvos em '{AUTH_STATE_FILE}'.\n")
 
 
 # ---------------------------------------------------------------------------
@@ -111,84 +108,25 @@ def _wait_page(driver, timeout: int = TIMEOUT) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Navegação
+# Coleta de hrefs da tabela de produtos
 # ---------------------------------------------------------------------------
 
-def _go_to_all_products(driver) -> None:
-    wait = WebDriverWait(driver, TIMEOUT)
-
-    # AJUSTE: link "Products" no menu lateral
-    wait.until(EC.element_to_be_clickable((By.XPATH,
-        "//nav//a[contains(normalize-space(),'Products')]"
-        " | //aside//a[contains(normalize-space(),'Products')]"
-        " | //*[contains(@class,'sidebar')]//a[contains(normalize-space(),'Products')]"
-    ))).click()
-    _wait_page(driver)
-
-    # AJUSTE: link "All Products" no submenu
-    wait.until(EC.element_to_be_clickable((By.XPATH,
-        "//a[contains(normalize-space(),'All Products')]"
-    ))).click()
-    _wait_page(driver)
-
-
-def _apply_filter(driver) -> None:
-    wait = WebDriverWait(driver, TIMEOUT)
-
-    # AJUSTE: campo Sigla
-    sigla = wait.until(EC.presence_of_element_located((By.XPATH,
-        "//input[@name='sigla'"
-        " or contains(@id,'sigla')"
-        " or contains(translate(@placeholder,'SIGLA','sigla'),'sigla')]"
-    )))
-    sigla.clear()
-    sigla.send_keys(SIGLA)
-
-    # AJUSTE: botão Apply Filter
-    wait.until(EC.element_to_be_clickable((By.XPATH,
-        "//button[contains(normalize-space(),'Apply Filter')]"
-        " | //input[@type='submit' and contains(@value,'Apply Filter')]"
-        " | //button[contains(normalize-space(),'Filtrar')]"
-    ))).click()
-    _wait_page(driver)
-
-
-def _set_pagesize_all(driver) -> None:
-    # AJUSTE: combobox pagesize
+def _collect_product_links(driver) -> list[tuple[str, str]]:
     try:
-        el = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH,
-            "//select[@name='pagesize'"
-            " or contains(@id,'pagesize')"
-            " or contains(@class,'pagesize')]"
-        )))
-        sel = Select(el)
-        for opt in sel.options:
-            if opt.text.strip().lower() in ("all", "todos", "tudo"):
-                sel.select_by_visible_text(opt.text.strip())
-                _wait_page(driver)
-                print(f"Pagesize definido para '{opt.text.strip()}'.")
-                return
-        # Fallback: última opção (geralmente a de maior volume)
-        sel.select_by_index(len(sel.options) - 1)
-        _wait_page(driver)
+        WebDriverWait(driver, TIMEOUT).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table#products tbody tr"))
+        )
     except TimeoutException:
-        print("AVISO: combobox 'pagesize' não encontrado. Continuando com paginação padrão.")
+        raise RuntimeError("Tabela 'table#products' não encontrada na página. Verifique a URL informada.")
 
-
-# ---------------------------------------------------------------------------
-# Coleta dos links da listagem
-# ---------------------------------------------------------------------------
-
-def _collect_product_links(driver) -> list[tuple[str, str | None]]:
-    # AJUSTE: seletor das linhas e do link de detalhe em cada linha
-    rows = driver.find_elements(By.XPATH, "//table//tbody//tr")
+    # AJUSTE: se o link de detalhe não for o primeiro <a> da linha, ajuste o seletor
+    links = driver.find_elements(By.CSS_SELECTOR, "table#products tbody tr td a")
     items = []
-    for row in rows:
-        try:
-            link = row.find_element(By.XPATH, ".//td//a")
-            items.append((link.text.strip(), link.get_attribute("href")))
-        except NoSuchElementException:
-            continue
+    for link in links:
+        href = link.get_attribute("href")
+        name = link.text.strip()
+        if href:
+            items.append((name, href))
     return items
 
 
@@ -226,7 +164,7 @@ def _extract_questionnaire(driver, section_title: str) -> dict:
         print(f"  AVISO: seção '{section_title}' não encontrada na página.")
         return {k: "" for k in ("completion_date", "expiration_date", "responder", "status")}
 
-    # AJUSTE: labels exatos conforme o HTML
+    # AJUSTE: labels exatos conforme o HTML da página de detalhe
     return {
         "completion_date": _get_field(section, "Completion Date"),
         "expiration_date": _get_field(section, "Expiration Date"),
@@ -239,34 +177,25 @@ def _extract_questionnaire(driver, section_title: str) -> dict:
 # Fluxo principal
 # ---------------------------------------------------------------------------
 
-def scrape() -> list[dict]:
+def scrape(url: str) -> list[dict]:
     results = []
     driver = _make_driver()
 
     try:
-        _restore_or_login(driver)
-        _go_to_all_products(driver)
-        _apply_filter(driver)
-        _set_pagesize_all(driver)
+        _restore_or_login(driver, url)
+
+        # Garante que está na URL correta após o login
+        if driver.current_url != url:
+            driver.get(url)
+            _wait_page(driver)
 
         products = _collect_product_links(driver)
         total = len(products)
-        print(f"\n{total} produto(s) encontrado(s). Iniciando extração...\n")
-
-        list_url = driver.current_url
+        print(f"{total} produto(s) encontrado(s). Iniciando extração...\n")
 
         for i, (name, href) in enumerate(products, 1):
             print(f"[{i}/{total}] {name}")
-
-            if href:
-                driver.get(href)
-            else:
-                # Sem href: volta à lista e clica pelo índice
-                driver.get(list_url)
-                _wait_page(driver)
-                driver.find_elements(By.XPATH, "//table//tbody//tr")[i - 1] \
-                    .find_element(By.XPATH, ".//td//a").click()
-
+            driver.get(href)
             _wait_page(driver)
 
             # AJUSTE: títulos exatos das seções conforme aparecem na tela
