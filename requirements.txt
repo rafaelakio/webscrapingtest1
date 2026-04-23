@@ -1,2 +1,2 @@
-playwright==1.44.0
+selenium>=4.6.0
 python-dotenv==1.0.0

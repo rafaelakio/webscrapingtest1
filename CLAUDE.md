@@ -13,14 +13,15 @@ Automates the manual process of collecting questionnaire data from a web applica
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 
-# 2. Install dependencies
+# 2. Install dependencies (Selenium Manager auto-downloads ChromeDriver on first run)
 pip install -r requirements.txt
-playwright install chromium
 
 # 3. Configure the target URL
 copy .env.example .env
 # Edit .env and set APP_URL=<url da aplicação>
 ```
+
+Requires Google Chrome already installed. No manual ChromeDriver setup needed — Selenium 4.6+ handles it automatically.
 
 ## Running
 
@@ -28,35 +29,36 @@ copy .env.example .env
 python main.py
 ```
 
-On first run a headed Chromium window opens for SSO login. After login, press Enter in the terminal. Auth state is persisted to `auth_state.json` and reused on subsequent runs (re-login is triggered automatically when the session expires).
+On first run a Chrome window opens for SSO login. After login, press Enter in the terminal. Auth cookies are persisted to `auth_state.json` and reused on subsequent runs (re-login triggers automatically when the session expires).
 
-Set `SLOW_MO=500` in `.env` to slow down browser actions for visual debugging.
+Set `SLOW_MO=1000` in `.env` to slow down browser actions for visual debugging.
 
 ## Architecture
 
 | File | Responsibility |
 |------|---------------|
-| `main.py` | Entry point — validates config, runs async scrape, calls exporter |
+| `main.py` | Entry point — validates config, calls scrape, calls exporter |
 | `scraper.py` | All browser automation: auth, navigation, filtering, extraction |
 | `exporter.py` | Writes results list to CSV with `utf-8-sig` encoding (Excel-compatible) |
 | `config.py` | Loads `.env` values; single source of truth for constants |
 
 ### Key flows in `scraper.py`
 
-- `_restore_or_login` — loads `auth_state.json` if present; if session expired or missing, opens headed browser and waits for manual SSO completion, then saves state.
+- `_restore_or_login` — loads `auth_state.json` cookies if present; if session expired or missing, opens Chrome and waits for manual SSO completion, then saves cookies.
 - `_go_to_all_products` → `_apply_filter` → `_set_pagesize_all` — three-step navigation to get all results on one page.
 - `_collect_product_links` — snapshots all `(name, href)` pairs before iteration to avoid stale element references.
-- `_extract_questionnaire(page, section_title)` — locates a Bootstrap panel/card by its heading text, then extracts Completion Date, Expiration Date, Responder, and Status using multiple selector fallbacks (table, definition list, label).
+- `_extract_questionnaire(driver, section_title)` — locates a Bootstrap panel/card by its heading text, then extracts Completion Date, Expiration Date, Responder, and Status using multiple XPath fallbacks (table, definition list, label).
+- `_wait_page` — waits for `document.readyState == complete` plus jQuery AJAX idle, with optional `SLOW_MO` delay.
 
 ## Selector Customization
 
 All selectors that depend on the real HTML are marked with `# AJUSTE` comments in `scraper.py`. Inspect the target page with browser DevTools (F12) and update:
 
-- Sidebar menu selector in `_go_to_all_products`
-- Sigla input selector in `_apply_filter`
-- Pagesize combobox selector in `_set_pagesize_all`
-- Table row selector in `_collect_product_links`
-- Section panel selector and field label strings in `_extract_questionnaire`
+- Sidebar menu XPath in `_go_to_all_products`
+- Sigla input XPath in `_apply_filter`
+- Pagesize combobox XPath in `_set_pagesize_all`
+- Table row XPath in `_collect_product_links`
+- Section panel XPath and field label strings in `_extract_questionnaire`
 
 ## Output
 
