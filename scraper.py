@@ -6,6 +6,7 @@ AJUSTES NECESSÁRIOS:
   Execute com SLOW_MO=1000 no .env para ver a automação em câmera lenta.
 """
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from config import APP_URL, AUTH_STATE_FILE, BROWSER, CHROMEDRIVER_PATH, SLOW_MO
+
+log = logging.getLogger(__name__)
 
 TIMEOUT = 15
 
@@ -72,21 +75,20 @@ def _restore_or_login(driver, target_url: str) -> None:
         driver.get(target_url)
         _wait_page(driver)
         if not _is_login_page(driver.current_url):
-            print("Sessão restaurada com sucesso.")
+            log.info("Sessão restaurada com sucesso.")
             return
-        print("Sessão expirada. Necessário novo login.")
+        log.warning("Sessão expirada. Necessário novo login.")
 
     driver.get(target_url)
     _wait_page(driver)
 
     if _is_login_page(driver.current_url):
-        print("\nLogin SSO detectado.")
-        print("Complete o login no browser aberto e pressione Enter aqui...")
+        log.info("Login SSO detectado. Complete o login no browser e pressione Enter aqui...")
         input()
         _wait_page(driver)
 
     _save_cookies(driver, AUTH_STATE_FILE)
-    print(f"Cookies salvos em '{AUTH_STATE_FILE}'.\n")
+    log.info("Cookies salvos em '%s'.", AUTH_STATE_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +119,7 @@ def _collect_product_links(driver) -> list[tuple[str, str]]:
             EC.presence_of_element_located((By.CSS_SELECTOR, "table#products tbody tr"))
         )
     except TimeoutException:
-        raise RuntimeError("Tabela 'table#products' não encontrada na página. Verifique a URL informada.")
+        raise RuntimeError("Tabela 'table#products' não encontrada. Verifique a URL informada.")
 
     # AJUSTE: se o link de detalhe não for o primeiro <a> da linha, ajuste o seletor
     links = driver.find_elements(By.CSS_SELECTOR, "table#products tbody tr td a")
@@ -131,46 +133,79 @@ def _collect_product_links(driver) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Extração de dados do detalhe
+# Navegação de abas
 # ---------------------------------------------------------------------------
 
-def _get_field(section, label: str) -> str:
-    for xpath in (
-        f".//th[contains(normalize-space(),'{label}')]/following-sibling::td[1]",
-        f".//td[contains(normalize-space(),'{label}')]/following-sibling::td[1]",
-        f".//dt[contains(normalize-space(),'{label}')]/following-sibling::dd[1]",
-        f".//label[contains(normalize-space(),'{label}')]/following-sibling::*[1]",
-        f".//strong[contains(normalize-space(),'{label}')]/following-sibling::span[1]",
-    ):
-        try:
-            el = section.find_element(By.XPATH, xpath)
-            return el.text.strip()
-        except NoSuchElementException:
-            continue
-    return ""
+def _click_overview_tab(driver) -> None:
+    """Clica na aba Overview (li[role=presentation] > span: Overview)."""
+    try:
+        tab = WebDriverWait(driver, TIMEOUT).until(
+            EC.element_to_be_clickable((By.XPATH,
+                "//li[@role='presentation']//span[contains(normalize-space(),'Overview')]"
+                " | //li[@role='tab']//span[contains(normalize-space(),'Overview')]"
+            ))
+        )
+        tab.click()
+        _wait_page(driver)
+        log.debug("  Aba 'Overview' selecionada.")
+    except TimeoutException:
+        log.warning("  Aba 'Overview' não encontrada — tentando extrair da página atual.")
 
 
-def _extract_questionnaire(driver, section_title: str) -> dict:
-    # AJUSTE: padrão do bloco/seção Bootstrap (panel, card, box, fieldset)
+# ---------------------------------------------------------------------------
+# Extração por seção (h3 + tabela dentro de #surveys)
+# ---------------------------------------------------------------------------
+
+def _extract_table_section(driver, h3_text: str, needed_columns: list[str]) -> dict:
+    """
+    Localiza o h3 com h3_text dentro de #surveys e extrai as colunas
+    needed_columns da primeira linha da tabela que vem logo após ele.
+    A correspondência é feita pelo nome do header — sem índices fixos.
+    """
+    empty = {col: "" for col in needed_columns}
+
+    # Encontra a primeira tabela após o h3 dentro de #surveys
     xpath = (
-        f"//*[contains(@class,'panel') and .//*[contains(normalize-space(),'{section_title}')]]"
-        f" | //*[contains(@class,'card') and .//*[contains(normalize-space(),'{section_title}')]]"
-        f" | //*[contains(@class,'box') and .//*[contains(normalize-space(),'{section_title}')]]"
-        f" | //fieldset[.//legend[contains(normalize-space(),'{section_title}')]]"
+        f"(//*[@id='surveys']"
+        f"//*[contains(normalize-space(),'{h3_text}')]"
+        f"/following::table)[1]"
     )
     try:
-        section = driver.find_element(By.XPATH, xpath)
+        table = driver.find_element(By.XPATH, xpath)
     except NoSuchElementException:
-        print(f"  AVISO: seção '{section_title}' não encontrada na página.")
-        return {k: "" for k in ("completion_date", "expiration_date", "responder", "status")}
+        log.warning("  Seção '%s' não encontrada em #surveys.", h3_text)
+        return empty
 
-    # AJUSTE: labels exatos conforme o HTML da página de detalhe
-    return {
-        "completion_date": _get_field(section, "Completion Date"),
-        "expiration_date": _get_field(section, "Expiration Date"),
-        "responder":       _get_field(section, "Responder"),
-        "status":          _get_field(section, "Status"),
-    }
+    # Lê os headers para mapear nome -> índice de coluna
+    headers = [
+        th.text.strip().lower()
+        for th in table.find_elements(By.XPATH, ".//thead//th")
+    ]
+    if not headers:
+        log.warning("  Seção '%s': nenhum header encontrado na tabela.", h3_text)
+        return empty
+
+    log.debug("  Seção '%s' — headers encontrados: %s", h3_text, headers)
+
+    # Lê a primeira linha de dados
+    rows = table.find_elements(By.XPATH, ".//tbody/tr")
+    if not rows:
+        log.warning("  Seção '%s': nenhuma linha de dados encontrada.", h3_text)
+        return empty
+
+    cells = rows[0].find_elements(By.TAG_NAME, "td")
+
+    result = {}
+    for col in needed_columns:
+        col_key = col.lower()
+        if col_key in headers:
+            idx = headers.index(col_key)
+            result[col] = cells[idx].text.strip() if idx < len(cells) else ""
+        else:
+            log.warning("  Seção '%s': coluna '%s' não encontrada. Headers: %s", h3_text, col, headers)
+            result[col] = ""
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -184,38 +219,66 @@ def scrape(url: str) -> list[dict]:
     try:
         _restore_or_login(driver, url)
 
-        # Garante que está na URL correta após o login
         if driver.current_url != url:
             driver.get(url)
             _wait_page(driver)
 
         products = _collect_product_links(driver)
         total = len(products)
-        print(f"{total} produto(s) encontrado(s). Iniciando extração...\n")
+        log.info("%d produto(s) encontrado(s). Iniciando extração...", total)
 
         for i, (name, href) in enumerate(products, 1):
-            print(f"[{i}/{total}] {name}")
+            log.info("─" * 60)
+            log.info("[%d/%d] %s", i, total, name)
+            log.info("  URL: %s", href)
+
             driver.get(href)
             _wait_page(driver)
+            _click_overview_tab(driver)
 
-            # AJUSTE: títulos exatos das seções conforme aparecem na tela
-            risk   = _extract_questionnaire(driver, "Risk Assessment")
-            access = _extract_questionnaire(driver, "Access")
+            # AJUSTE: textos exatos dos h3 conforme aparecem na tela
+            risk = _extract_table_section(
+                driver,
+                h3_text="Questionnaire Risk Assessment",
+                needed_columns=["Overall Risk", "Responder", "Status", "Completion Date", "Expiration Date"],
+            )
+            access = _extract_table_section(
+                driver,
+                h3_text="Questionnaire Access",
+                needed_columns=["Responder", "Status", "Completion Date"],
+            )
+
+            log.info("  [Risk Assessment]")
+            log.info("    Overall Risk    : %s", risk.get("Overall Risk")    or "(vazio)")
+            log.info("    Responder       : %s", risk.get("Responder")       or "(vazio)")
+            log.info("    Status          : %s", risk.get("Status")          or "(vazio)")
+            log.info("    Completion Date : %s", risk.get("Completion Date") or "(vazio)")
+            log.info("    Expiration Date : %s", risk.get("Expiration Date") or "(vazio)")
+
+            log.info("  [Access]")
+            log.info("    Responder       : %s", access.get("Responder")       or "(vazio)")
+            log.info("    Status          : %s", access.get("Status")          or "(vazio)")
+            log.info("    Completion Date : %s", access.get("Completion Date") or "(vazio)")
 
             results.append({
-                "produto":                name,
-                "risk_completion_date":   risk["completion_date"],
-                "risk_expiration_date":   risk["expiration_date"],
-                "risk_responder":         risk["responder"],
-                "risk_status":            risk["status"],
-                "access_completion_date": access["completion_date"],
-                "access_expiration_date": access["expiration_date"],
-                "access_responder":       access["responder"],
-                "access_status":          access["status"],
+                "produto":                  name,
+                "risk_overall_risk":        risk.get("Overall Risk", ""),
+                "risk_responder":           risk.get("Responder", ""),
+                "risk_status":              risk.get("Status", ""),
+                "risk_completion_date":     risk.get("Completion Date", ""),
+                "risk_expiration_date":     risk.get("Expiration Date", ""),
+                "access_responder":         access.get("Responder", ""),
+                "access_status":            access.get("Status", ""),
+                "access_completion_date":   access.get("Completion Date", ""),
             })
+
+            log.info("  Registro %d capturado com sucesso.", i)
 
             driver.back()
             _wait_page(driver)
+
+        log.info("─" * 60)
+        log.info("Extração concluída: %d/%d registro(s) capturado(s).", len(results), total)
 
     finally:
         _save_cookies(driver, AUTH_STATE_FILE)
