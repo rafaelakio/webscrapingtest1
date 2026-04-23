@@ -158,6 +158,49 @@ def _click_overview_tab(driver) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Diagnóstico da página de detalhe
+# ---------------------------------------------------------------------------
+
+def _diagnose_page(driver) -> None:
+    """Loga a estrutura encontrada na página para ajudar a identificar seletores errados."""
+    log.warning("  ── DIAGNÓSTICO DA PÁGINA ──")
+
+    # Verifica se #surveys existe
+    surveys = driver.find_elements(By.ID, "surveys")
+    if not surveys:
+        log.warning("  #surveys NÃO encontrado na página.")
+        all_tables = driver.find_elements(By.TAG_NAME, "table")
+        log.warning("  Tabelas encontradas na página: %d", len(all_tables))
+        for t in all_tables:
+            tid = t.get_attribute("id") or "(sem id)"
+            tcls = t.get_attribute("class") or "(sem class)"
+            log.warning("    <table id='%s' class='%s'>", tid, tcls)
+    else:
+        log.warning("  #surveys encontrado.")
+
+        # Lista todos os h3 dentro de #surveys
+        headings = surveys[0].find_elements(By.XPATH, ".//h3")
+        log.warning("  h3 encontrados em #surveys (%d):", len(headings))
+        for h in headings:
+            log.warning("    '%s'", h.text.strip())
+
+        # Lista headers de cada tabela dentro de #surveys
+        tables = surveys[0].find_elements(By.TAG_NAME, "table")
+        log.warning("  Tabelas dentro de #surveys (%d):", len(tables))
+        for idx, t in enumerate(tables):
+            headers = [th.text.strip() for th in t.find_elements(By.XPATH, ".//thead//th")]
+            log.warning("    Tabela %d — headers: %s", idx + 1, headers)
+
+    # Verifica abas disponíveis
+    tabs = driver.find_elements(By.XPATH, "//li[@role='presentation'] | //li[@role='tab']")
+    log.warning("  Abas encontradas (%d):", len(tabs))
+    for tab in tabs:
+        log.warning("    '%s'", tab.text.strip())
+
+    log.warning("  ── FIM DO DIAGNÓSTICO ──")
+
+
+# ---------------------------------------------------------------------------
 # Extração por seção (h3 + tabela dentro de #surveys)
 # ---------------------------------------------------------------------------
 
@@ -264,6 +307,13 @@ def scrape(url: str) -> list[dict]:
             log.info("    Responder       : %s", access.get("Responder")       or "(vazio)")
             log.info("    Status          : %s", access.get("Status")          or "(vazio)")
             log.info("    Completion Date : %s", access.get("Completion Date") or "(vazio)")
+
+            all_empty = not any([
+                risk.get("Overall Risk"), risk.get("Responder"), risk.get("Status"),
+                access.get("Responder"), access.get("Status"),
+            ])
+            if all_empty:
+                _diagnose_page(driver)
 
             results.append({
                 "produto":                  name,
