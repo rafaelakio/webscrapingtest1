@@ -1,0 +1,5 @@
+.env
+auth_state.json
+*.csv
+__pycache__/
+.venv/
