@@ -12,11 +12,12 @@ from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 
-from config import APP_URL, AUTH_STATE_FILE, SIGLA, SLOW_MO
+from config import APP_URL, AUTH_STATE_FILE, CHROMEDRIVER_PATH, SIGLA, SLOW_MO
 
 TIMEOUT = 15  # segundos para esperar elementos
 
@@ -29,7 +30,15 @@ def _make_driver() -> webdriver.Chrome:
     options = webdriver.ChromeOptions()
     # options.add_argument("--headless=new")  # descomente para rodar sem janela
     options.add_argument("--start-maximized")
-    return webdriver.Chrome(options=options)  # Selenium Manager baixa o ChromeDriver automaticamente
+
+    driver_path = Path(CHROMEDRIVER_PATH)
+    if not driver_path.exists():
+        raise FileNotFoundError(
+            f"ChromeDriver não encontrado em '{driver_path}'.\n"
+            "Baixe em: https://googlechromelabs.github.io/chrome-for-testing/\n"
+            "e coloque o chromedriver.exe na pasta do projeto ou defina CHROMEDRIVER_PATH no .env"
+        )
+    return webdriver.Chrome(service=Service(executable_path=str(driver_path)), options=options)
 
 
 # ---------------------------------------------------------------------------
