@@ -10,7 +10,9 @@ OUTPUT_FILE = "levantamento_ic5.csv"
 SIGLA = "ic5"
 SLOW_MO = int(os.getenv("SLOW_MO", "0"))
 
-# Caminho para o chromedriver.exe.
-# Se não definido no .env, procura chromedriver.exe na mesma pasta do projeto.
+# Browser a usar: "chrome" (padrão) ou "edge"
+BROWSER = os.getenv("BROWSER", "chrome").lower()
+
+# Caminho para o chromedriver.exe (só usado quando BROWSER=chrome)
 _BASE_DIR = Path(__file__).parent
 CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH") or str(_BASE_DIR / "chromedriver.exe")
