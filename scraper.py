@@ -7,6 +7,7 @@ AJUSTES NECESSÁRIOS:
 """
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -121,14 +122,18 @@ def _collect_product_links(driver) -> list[tuple[str, str]]:
     except TimeoutException:
         raise RuntimeError("Tabela 'table#products' não encontrada. Verifique a URL informada.")
 
-    # AJUSTE: se o link de detalhe não for o primeiro <a> da linha, ajuste o seletor
-    links = driver.find_elements(By.CSS_SELECTOR, "table#products tbody tr td a")
+    # Padrão esperado: /product/<id> sem sub-caminhos após o id numérico
+    # AJUSTE: altere o regex se o padrão de URL for diferente
+    product_url_pattern = re.compile(r"/product/\d+/?$")
+
+    rows = driver.find_elements(By.CSS_SELECTOR, "table#products tbody tr")
     items = []
-    for link in links:
-        href = link.get_attribute("href")
-        name = link.text.strip()
-        if href:
-            items.append((name, href))
+    for row in rows:
+        for link in row.find_elements(By.CSS_SELECTOR, "td a"):
+            href = link.get_attribute("href") or ""
+            if product_url_pattern.search(href):
+                items.append((link.text.strip(), href))
+                break  # pega apenas o primeiro link válido por linha
     return items
 
 
