@@ -142,19 +142,26 @@ def _collect_product_links(driver) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 def _click_overview_tab(driver) -> None:
-    """Clica na aba Overview (li[role=presentation] > span: Overview)."""
+    """Clica no <a> da aba Overview e aguarda o conteúdo dos painéis carregar."""
     try:
-        tab = WebDriverWait(driver, TIMEOUT).until(
+        tab_link = WebDriverWait(driver, TIMEOUT).until(
             EC.element_to_be_clickable((By.XPATH,
-                "//li[@role='presentation']//span[contains(normalize-space(),'Overview')]"
-                " | //li[@role='tab']//span[contains(normalize-space(),'Overview')]"
+                "//li[@role='presentation' and .//span[contains(normalize-space(),'Overview')]]//a"
+                " | //li[@role='tab' and .//span[contains(normalize-space(),'Overview')]]//a"
+                " | //a[contains(normalize-space(),'Overview') and ancestor::li[@role]]"
             ))
         )
-        tab.click()
-        _wait_page(driver)
-        log.debug("  Aba 'Overview' selecionada.")
+        tab_link.click()
+        log.debug("  Clique na aba 'Overview' realizado.")
+
+        # Aguarda qualquer tabela dentro de um panel-body aparecer
+        WebDriverWait(driver, TIMEOUT).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".panel-body table"))
+        )
+        log.debug("  Conteúdo dos painéis carregado.")
+
     except TimeoutException:
-        log.warning("  Aba 'Overview' não encontrada — tentando extrair da página atual.")
+        log.warning("  Aba 'Overview' não respondeu ou painéis não carregaram após o clique.")
 
 
 # ---------------------------------------------------------------------------
@@ -165,33 +172,20 @@ def _diagnose_page(driver) -> None:
     """Loga a estrutura encontrada na página para ajudar a identificar seletores errados."""
     log.warning("  ── DIAGNÓSTICO DA PÁGINA ──")
 
-    # Verifica se #surveys existe
-    surveys = driver.find_elements(By.ID, "surveys")
-    if not surveys:
-        log.warning("  #surveys NÃO encontrado na página.")
-        all_tables = driver.find_elements(By.TAG_NAME, "table")
-        log.warning("  Tabelas encontradas na página: %d", len(all_tables))
-        for t in all_tables:
-            tid = t.get_attribute("id") or "(sem id)"
-            tcls = t.get_attribute("class") or "(sem class)"
-            log.warning("    <table id='%s' class='%s'>", tid, tcls)
-    else:
-        log.warning("  #surveys encontrado.")
+    # Painéis Bootstrap com heading
+    panels = driver.find_elements(By.XPATH, "//div[contains(@class,'panel')]")
+    log.warning("  Painéis (.panel) encontrados: %d", len(panels))
+    for panel in panels:
+        headings = panel.find_elements(By.XPATH, ".//*[self::h1 or self::h2 or self::h3 or self::h4]")
+        heading_text = headings[0].text.strip() if headings else "(sem heading)"
+        tables = panel.find_elements(By.TAG_NAME, "table")
+        table_ids = [t.get_attribute("id") or "(sem id)" for t in tables]
+        headers = []
+        if tables:
+            headers = [th.text.strip() for th in tables[0].find_elements(By.XPATH, ".//thead//th")]
+        log.warning("    Painel: '%s' | tabelas: %s | headers: %s", heading_text, table_ids, headers)
 
-        # Lista todos os h3 dentro de #surveys
-        headings = surveys[0].find_elements(By.XPATH, ".//h3")
-        log.warning("  h3 encontrados em #surveys (%d):", len(headings))
-        for h in headings:
-            log.warning("    '%s'", h.text.strip())
-
-        # Lista headers de cada tabela dentro de #surveys
-        tables = surveys[0].find_elements(By.TAG_NAME, "table")
-        log.warning("  Tabelas dentro de #surveys (%d):", len(tables))
-        for idx, t in enumerate(tables):
-            headers = [th.text.strip() for th in t.find_elements(By.XPATH, ".//thead//th")]
-            log.warning("    Tabela %d — headers: %s", idx + 1, headers)
-
-    # Verifica abas disponíveis
+    # Abas disponíveis
     tabs = driver.find_elements(By.XPATH, "//li[@role='presentation'] | //li[@role='tab']")
     log.warning("  Abas encontradas (%d):", len(tabs))
     for tab in tabs:
@@ -206,22 +200,22 @@ def _diagnose_page(driver) -> None:
 
 def _extract_table_section(driver, h3_text: str, needed_columns: list[str]) -> dict:
     """
-    Localiza o h3 com h3_text dentro de #surveys e extrai as colunas
-    needed_columns da primeira linha da tabela que vem logo após ele.
-    A correspondência é feita pelo nome do header — sem índices fixos.
+    Localiza o painel Bootstrap cujo heading contém h3_text e extrai
+    needed_columns da primeira linha da tabela no panel-body.
+    Correspondência feita pelo nome do header — sem índices fixos.
     """
     empty = {col: "" for col in needed_columns}
 
-    # Encontra a primeira tabela após o h3 dentro de #surveys
+    # Estrutura real: div.panel > div.panel-heading (com h3) + div.panel-body > table
     xpath = (
-        f"(//*[@id='surveys']"
-        f"//*[contains(normalize-space(),'{h3_text}')]"
-        f"/following::table)[1]"
+        f"//div[contains(@class,'panel') and "
+        f".//*[contains(normalize-space(),'{h3_text}')]]"
+        f"//div[contains(@class,'panel-body')]//table"
     )
     try:
         table = driver.find_element(By.XPATH, xpath)
     except NoSuchElementException:
-        log.warning("  Seção '%s' não encontrada em #surveys.", h3_text)
+        log.warning("  Seção '%s' não encontrada (panel-heading).", h3_text)
         return empty
 
     # Lê os headers para mapear nome -> índice de coluna
@@ -230,15 +224,15 @@ def _extract_table_section(driver, h3_text: str, needed_columns: list[str]) -> d
         for th in table.find_elements(By.XPATH, ".//thead//th")
     ]
     if not headers:
-        log.warning("  Seção '%s': nenhum header encontrado na tabela.", h3_text)
+        log.warning("  Seção '%s': nenhum header encontrado.", h3_text)
         return empty
 
-    log.debug("  Seção '%s' — headers encontrados: %s", h3_text, headers)
+    log.debug("  Seção '%s' — headers: %s", h3_text, headers)
 
     # Lê a primeira linha de dados
     rows = table.find_elements(By.XPATH, ".//tbody/tr")
     if not rows:
-        log.warning("  Seção '%s': nenhuma linha de dados encontrada.", h3_text)
+        log.warning("  Seção '%s': nenhuma linha de dados.", h3_text)
         return empty
 
     cells = rows[0].find_elements(By.TAG_NAME, "td")
