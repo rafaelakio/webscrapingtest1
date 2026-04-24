@@ -209,23 +209,27 @@ def _extract_product_name(driver) -> str:
     return ""
 
 
-def _extract_metadata_field(driver, field_name: str) -> str:
+def _extract_metadata_field(driver, *field_names: str) -> str:
     """
     Extrai o valor de um campo de metadados pelo label em <strong>.
+    Tenta cada nome em field_names até encontrar — útil para campos com variações de grafia.
     Estrutura: <td><strong>Label</strong></td><td>valor ou <a href>valor</a></td>
     """
-    try:
-        cell = driver.find_element(By.XPATH,
-            f"//td[.//strong[contains(normalize-space(),'{field_name}')]]/following-sibling::td[1]"
-        )
-        # Se o valor estiver num link, prefere o href; caso contrário usa o texto visível
-        links = cell.find_elements(By.TAG_NAME, "a")
-        if links:
-            return (links[0].get_attribute("href") or links[0].text).strip()
-        return cell.text.strip()
-    except NoSuchElementException:
-        log.warning("  Campo '%s' não encontrado na página.", field_name)
-        return ""
+    for field_name in field_names:
+        try:
+            cell = driver.find_element(By.XPATH,
+                f"//td[.//strong[normalize-space()='{field_name}']"
+                f" or .//strong[contains(normalize-space(),'{field_name}')]"
+                f"]/following-sibling::td[1]"
+            )
+            links = cell.find_elements(By.TAG_NAME, "a")
+            if links:
+                return (links[0].get_attribute("href") or links[0].text).strip()
+            return cell.text.strip()
+        except NoSuchElementException:
+            continue
+    log.warning("  Campo %s não encontrado na página.", " / ".join(f"'{n}'" for n in field_names))
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +319,7 @@ def scrape(url: str) -> list[dict]:
             # Nome do produto: fallback para o heading da página se o link da lista vier vazio
             produto   = name or _extract_product_name(driver)
             sigla_app = _extract_metadata_field(driver, "Sigla app")
-            repox     = _extract_metadata_field(driver, "REPOX")
+            repo      = _extract_metadata_field(driver, "REPO", "Repo")
 
             # AJUSTE: textos exatos dos h3/panel-heading conforme aparecem na tela
             risk = _extract_table_section(
@@ -330,7 +334,7 @@ def scrape(url: str) -> list[dict]:
             )
 
             log.info("  Sigla app       : %s", sigla_app or "(vazio)")
-            log.info("  REPOX           : %s", repox     or "(vazio)")
+            log.info("  REPO            : %s", repo      or "(vazio)")
             log.info("  Produto         : %s", produto   or "(vazio)")
             log.info("  [Risk Assessment]")
             log.info("    Overall Risk    : %s", risk.get("Overall Risk")    or "(vazio)")
@@ -353,7 +357,7 @@ def scrape(url: str) -> list[dict]:
             results.append({
                 "produto":                  produto,
                 "sigla_app":                sigla_app,
-                "repox":                    repox,
+                "repo":                     repo,
                 "url":                      href,
                 "risk_overall_risk":        risk.get("Overall Risk", ""),
                 "risk_responder":           risk.get("Responder", ""),
