@@ -6,17 +6,19 @@ from pathlib import Path
 
 from scraper import scrape
 from exporter import save_csv
-from config import OUTPUT_FILE, APP_URL
+from config import APP_URL
+
+
+def _build_filename(now: datetime) -> str:
+    ms = now.microsecond // 1000
+    return f"relatorio-{now.strftime('%Y%m%d-%H%M%S')}{ms:03d}.csv"
 
 
 def setup_logging(log_file: str) -> None:
-    fmt = "%(asctime)s [%(levelname)s] %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S"
-
     logging.basicConfig(
         level=logging.INFO,
-        format=fmt,
-        datefmt=datefmt,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler(log_file, encoding="utf-8"),
@@ -27,7 +29,7 @@ def setup_logging(log_file: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Levantamento de questionários IC5")
     parser.add_argument("url", nargs="?", default=None, help="URL da página com a tabela de produtos")
-    parser.add_argument("--log", default=None, help="Caminho do arquivo de log (padrão: levantamento_YYYYMMDD_HHMMSS.log)")
+    parser.add_argument("--log", default=None, help="Caminho do arquivo de log (padrão: mesmo nome do CSV com .log)")
     args = parser.parse_args()
 
     url = args.url or APP_URL
@@ -36,19 +38,22 @@ def main():
         print("Uso: python main.py https://sua-aplicacao.com/products")
         sys.exit(1)
 
-    log_file = args.log or f"levantamento_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    setup_logging(log_file)
+    now = datetime.now()
+    csv_file = _build_filename(now)
+    log_file = args.log or csv_file.replace(".csv", ".log")
 
+    setup_logging(log_file)
     log = logging.getLogger(__name__)
     log.info("=== Levantamento IC5 ===")
-    log.info("URL: %s", url)
-    log.info("Log: %s", Path(log_file).resolve())
+    log.info("URL    : %s", url)
+    log.info("CSV    : %s", Path(csv_file).resolve())
+    log.info("Log    : %s", Path(log_file).resolve())
 
     records = scrape(url)
 
     if records:
-        save_csv(records, OUTPUT_FILE)
-        log.info("CSV salvo em '%s' (%d registro(s)).", OUTPUT_FILE, len(records))
+        save_csv(records, csv_file)
+        log.info("CSV salvo em '%s' (%d registro(s)).", csv_file, len(records))
     else:
         log.warning("Nenhum registro extraído.")
 

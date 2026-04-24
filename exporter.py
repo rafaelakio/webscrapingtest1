@@ -4,6 +4,7 @@ from pathlib import Path
 FIELDS = [
     "produto",
     "sigla_app",
+    "repox",
     "url",
     "risk_overall_risk",
     "risk_responder",

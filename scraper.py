@@ -209,18 +209,18 @@ def _extract_product_name(driver) -> str:
     return ""
 
 
-def _extract_sigla_app(driver) -> str:
+def _extract_metadata_field(driver, field_name: str) -> str:
     """
-    Extrai o valor da linha 'Sigla app' na tabela de metadados.
-    Estrutura: <td><strong>Sigla app</strong></td><td>valor</td>
+    Extrai o valor de um campo de metadados pelo label em <strong>.
+    Estrutura: <td><strong>Label</strong></td><td>valor</td>
     """
     try:
         cell = driver.find_element(By.XPATH,
-            "//td[.//strong[contains(normalize-space(),'Sigla app')]]/following-sibling::td[1]"
+            f"//td[.//strong[contains(normalize-space(),'{field_name}')]]/following-sibling::td[1]"
         )
         return cell.text.strip()
     except NoSuchElementException:
-        log.warning("  Campo 'Sigla app' não encontrado na página.")
+        log.warning("  Campo '%s' não encontrado na página.", field_name)
         return ""
 
 
@@ -309,8 +309,9 @@ def scrape(url: str) -> list[dict]:
             _click_overview_tab(driver)
 
             # Nome do produto: fallback para o heading da página se o link da lista vier vazio
-            produto = name or _extract_product_name(driver)
-            sigla_app = _extract_sigla_app(driver)
+            produto   = name or _extract_product_name(driver)
+            sigla_app = _extract_metadata_field(driver, "Sigla app")
+            repox     = _extract_metadata_field(driver, "REPOX")
 
             # AJUSTE: textos exatos dos h3/panel-heading conforme aparecem na tela
             risk = _extract_table_section(
@@ -325,6 +326,7 @@ def scrape(url: str) -> list[dict]:
             )
 
             log.info("  Sigla app       : %s", sigla_app or "(vazio)")
+            log.info("  REPOX           : %s", repox     or "(vazio)")
             log.info("  Produto         : %s", produto   or "(vazio)")
             log.info("  [Risk Assessment]")
             log.info("    Overall Risk    : %s", risk.get("Overall Risk")    or "(vazio)")
@@ -347,6 +349,7 @@ def scrape(url: str) -> list[dict]:
             results.append({
                 "produto":                  produto,
                 "sigla_app":                sigla_app,
+                "repox":                    repox,
                 "url":                      href,
                 "risk_overall_risk":        risk.get("Overall Risk", ""),
                 "risk_responder":           risk.get("Responder", ""),
