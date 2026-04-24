@@ -3,6 +3,8 @@ from pathlib import Path
 
 FIELDS = [
     "produto",
+    "sigla_app",
+    "url",
     "risk_overall_risk",
     "risk_responder",
     "risk_status",

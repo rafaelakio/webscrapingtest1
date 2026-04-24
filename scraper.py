@@ -195,7 +195,37 @@ def _diagnose_page(driver) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Extração por seção (h3 + tabela dentro de #surveys)
+# Extração de campos da página de detalhe
+# ---------------------------------------------------------------------------
+
+def _extract_product_name(driver) -> str:
+    """Tenta extrair o nome do produto do heading principal da página de detalhe."""
+    for xpath in ("//h1", "//h2", "//*[contains(@class,'product-name')]"):
+        els = driver.find_elements(By.XPATH, xpath)
+        if els:
+            text = els[0].text.strip()
+            if text:
+                return text
+    return ""
+
+
+def _extract_sigla_app(driver) -> str:
+    """
+    Extrai o valor da linha 'Sigla app' na tabela de metadados.
+    Estrutura: <td><strong>Sigla app</strong></td><td>valor</td>
+    """
+    try:
+        cell = driver.find_element(By.XPATH,
+            "//td[.//strong[contains(normalize-space(),'Sigla app')]]/following-sibling::td[1]"
+        )
+        return cell.text.strip()
+    except NoSuchElementException:
+        log.warning("  Campo 'Sigla app' não encontrado na página.")
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Extração por seção (panel-heading + panel-body > table)
 # ---------------------------------------------------------------------------
 
 def _extract_table_section(driver, h3_text: str, needed_columns: list[str]) -> dict:
@@ -278,7 +308,11 @@ def scrape(url: str) -> list[dict]:
             _wait_page(driver)
             _click_overview_tab(driver)
 
-            # AJUSTE: textos exatos dos h3 conforme aparecem na tela
+            # Nome do produto: fallback para o heading da página se o link da lista vier vazio
+            produto = name or _extract_product_name(driver)
+            sigla_app = _extract_sigla_app(driver)
+
+            # AJUSTE: textos exatos dos h3/panel-heading conforme aparecem na tela
             risk = _extract_table_section(
                 driver,
                 h3_text="Questionnaire Risk Assessment",
@@ -290,13 +324,14 @@ def scrape(url: str) -> list[dict]:
                 needed_columns=["Responder", "Status", "Completion Date"],
             )
 
+            log.info("  Sigla app       : %s", sigla_app or "(vazio)")
+            log.info("  Produto         : %s", produto   or "(vazio)")
             log.info("  [Risk Assessment]")
             log.info("    Overall Risk    : %s", risk.get("Overall Risk")    or "(vazio)")
             log.info("    Responder       : %s", risk.get("Responder")       or "(vazio)")
             log.info("    Status          : %s", risk.get("Status")          or "(vazio)")
             log.info("    Completion Date : %s", risk.get("Completion Date") or "(vazio)")
             log.info("    Expiration Date : %s", risk.get("Expiration Date") or "(vazio)")
-
             log.info("  [Access]")
             log.info("    Responder       : %s", access.get("Responder")       or "(vazio)")
             log.info("    Status          : %s", access.get("Status")          or "(vazio)")
@@ -310,7 +345,9 @@ def scrape(url: str) -> list[dict]:
                 _diagnose_page(driver)
 
             results.append({
-                "produto":                  name,
+                "produto":                  produto,
+                "sigla_app":                sigla_app,
+                "url":                      href,
                 "risk_overall_risk":        risk.get("Overall Risk", ""),
                 "risk_responder":           risk.get("Responder", ""),
                 "risk_status":              risk.get("Status", ""),
