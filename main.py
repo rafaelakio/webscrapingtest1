@@ -15,6 +15,10 @@ def _build_filename(now: datetime) -> str:
 
 
 def setup_logging(log_file: str) -> None:
+    # Força UTF-8 no terminal Windows (cp1252 não suporta alguns caracteres Unicode)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",

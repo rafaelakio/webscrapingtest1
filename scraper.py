@@ -212,12 +212,16 @@ def _extract_product_name(driver) -> str:
 def _extract_metadata_field(driver, field_name: str) -> str:
     """
     Extrai o valor de um campo de metadados pelo label em <strong>.
-    Estrutura: <td><strong>Label</strong></td><td>valor</td>
+    Estrutura: <td><strong>Label</strong></td><td>valor ou <a href>valor</a></td>
     """
     try:
         cell = driver.find_element(By.XPATH,
             f"//td[.//strong[contains(normalize-space(),'{field_name}')]]/following-sibling::td[1]"
         )
+        # Se o valor estiver num link, prefere o href; caso contrário usa o texto visível
+        links = cell.find_elements(By.TAG_NAME, "a")
+        if links:
+            return (links[0].get_attribute("href") or links[0].text).strip()
         return cell.text.strip()
     except NoSuchElementException:
         log.warning("  Campo '%s' não encontrado na página.", field_name)
@@ -300,7 +304,7 @@ def scrape(url: str) -> list[dict]:
         log.info("%d produto(s) encontrado(s). Iniciando extração...", total)
 
         for i, (name, href) in enumerate(products, 1):
-            log.info("─" * 60)
+            log.info("-" * 60)
             log.info("[%d/%d] %s", i, total, name)
             log.info("  URL: %s", href)
 
@@ -366,7 +370,7 @@ def scrape(url: str) -> list[dict]:
             driver.back()
             _wait_page(driver)
 
-        log.info("─" * 60)
+        log.info("-" * 60)
         log.info("Extração concluída: %d/%d registro(s) capturado(s).", len(results), total)
 
     finally:
