@@ -198,15 +198,16 @@ def _diagnose_page(driver) -> None:
 # Extração de campos da página de detalhe
 # ---------------------------------------------------------------------------
 
-def _extract_product_name(driver) -> str:
-    """Tenta extrair o nome do produto do heading principal da página de detalhe."""
-    for xpath in ("//h1", "//h2", "//*[contains(@class,'product-name')]"):
-        els = driver.find_elements(By.XPATH, xpath)
-        if els:
-            text = els[0].text.strip()
-            if text:
-                return text
-    return ""
+def _extract_app_name(driver) -> str:
+    """Aguarda e extrai o nome da aplicação do h3 principal da página de detalhe."""
+    try:
+        el = WebDriverWait(driver, TIMEOUT).until(
+            EC.presence_of_element_located((By.XPATH, "//h3[contains(@class,'no-margin-top')]"))
+        )
+        return re.sub(r"[®\s]+$", "", el.text).strip()
+    except TimeoutException:
+        log.warning("  Nome da aplicação (h3.no-margin-top) não encontrado.")
+        return ""
 
 
 def _extract_metadata_field(driver, *field_names: str) -> str:
@@ -316,8 +317,19 @@ def scrape(url: str) -> list[dict]:
             _wait_page(driver)
             _click_overview_tab(driver)
 
-            # Nome do produto: fallback para o heading da página se o link da lista vier vazio
-            produto   = name or _extract_product_name(driver)
+            nome_aplicacao = _extract_app_name(driver)
+
+            # Aguarda os campos de metadados carregarem antes de capturá-los
+            try:
+                WebDriverWait(driver, TIMEOUT).until(
+                    EC.presence_of_element_located((By.XPATH,
+                        "//td[.//strong[contains(normalize-space(),'REPO')"
+                        " or contains(normalize-space(),'Repo')]]"
+                    ))
+                )
+            except TimeoutException:
+                log.warning("  Campo REPO não carregou dentro do timeout.")
+
             sigla_app = _extract_metadata_field(driver, "Sigla app")
             repo      = _extract_metadata_field(driver, "REPO", "Repo")
 
@@ -333,9 +345,9 @@ def scrape(url: str) -> list[dict]:
                 needed_columns=["Responder", "Status", "Completion Date"],
             )
 
-            log.info("  Sigla app       : %s", sigla_app or "(vazio)")
-            log.info("  REPO            : %s", repo      or "(vazio)")
-            log.info("  Produto         : %s", produto   or "(vazio)")
+            log.info("  Nome aplicação  : %s", nome_aplicacao or "(vazio)")
+            log.info("  Sigla app       : %s", sigla_app     or "(vazio)")
+            log.info("  REPO            : %s", repo          or "(vazio)")
             log.info("  [Risk Assessment]")
             log.info("    Overall Risk    : %s", risk.get("Overall Risk")    or "(vazio)")
             log.info("    Responder       : %s", risk.get("Responder")       or "(vazio)")
@@ -355,7 +367,7 @@ def scrape(url: str) -> list[dict]:
                 _diagnose_page(driver)
 
             results.append({
-                "produto":                  produto,
+                "nome_aplicacao":            nome_aplicacao,
                 "sigla_app":                sigla_app,
                 "repo":                     repo,
                 "url":                      href,

@@ -2,7 +2,7 @@ import csv
 from pathlib import Path
 
 FIELDS = [
-    "produto",
+    "nome_aplicacao",
     "sigla_app",
     "repo",
     "url",
@@ -17,9 +17,12 @@ FIELDS = [
 ]
 
 
-def save_csv(records: list[dict], path: str) -> None:
+def save_csv(records: list[dict], path: str, append: bool = False) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+    file_exists = Path(path).exists()
+    mode = "a" if append else "w"
+    with open(path, mode, newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore", delimiter=";")
-        writer.writeheader()
+        if not (append and file_exists):
+            writer.writeheader()
         writer.writerows(records)

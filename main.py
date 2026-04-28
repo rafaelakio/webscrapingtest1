@@ -33,6 +33,7 @@ def setup_logging(log_file: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Levantamento de questionários IC5")
     parser.add_argument("url", nargs="?", default=None, help="URL da página com a tabela de produtos")
+    parser.add_argument("--output", "-o", default=None, help="Arquivo CSV de saída (se já existir, as linhas são adicionadas ao final sem duplicar o cabeçalho)")
     parser.add_argument("--log", default=None, help="Caminho do arquivo de log (padrão: mesmo nome do CSV com .log)")
     args = parser.parse_args()
 
@@ -43,7 +44,8 @@ def main():
         sys.exit(1)
 
     now = datetime.now()
-    csv_file = _build_filename(now)
+    csv_file = args.output or _build_filename(now)
+    append = args.output is not None and Path(csv_file).exists()
     log_file = args.log or csv_file.replace(".csv", ".log")
 
     setup_logging(log_file)
@@ -51,13 +53,15 @@ def main():
     log.info("=== Levantamento IC5 ===")
     log.info("URL    : %s", url)
     log.info("CSV    : %s", Path(csv_file).resolve())
+    log.info("Modo   : %s", "append" if append else "novo arquivo")
     log.info("Log    : %s", Path(log_file).resolve())
 
     records = scrape(url)
 
     if records:
-        save_csv(records, csv_file)
-        log.info("CSV salvo em '%s' (%d registro(s)).", csv_file, len(records))
+        save_csv(records, csv_file, append=append)
+        action = "adicionado(s) a" if append else "salvo em"
+        log.info("CSV %s '%s' (%d registro(s)).", action, csv_file, len(records))
     else:
         log.warning("Nenhum registro extraído.")
 

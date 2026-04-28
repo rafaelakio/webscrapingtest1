@@ -26,20 +26,35 @@ Requires Google Chrome already installed. No manual ChromeDriver setup needed �
 ## Running
 
 ```bash
+# Gera um novo CSV com nome automático baseado em timestamp
 python main.py
+
+# Salva em um arquivo específico (cria se não existir)
+python main.py --output relatorio.csv
+
+# Adiciona ao final de um CSV existente sem duplicar o cabeçalho
+python main.py --output relatorio.csv   # se relatorio.csv já existir → append
 ```
 
 On first run a Chrome window opens for SSO login. After login, press Enter in the terminal. Auth cookies are persisted to `auth_state.json` and reused on subsequent runs (re-login triggers automatically when the session expires).
 
 Set `SLOW_MO=1000` in `.env` to slow down browser actions for visual debugging.
 
+### Output file behavior
+
+| Situação | Comportamento |
+|----------|---------------|
+| Sem `--output` | Cria `relatorio-YYYYMMDD-HHMMSSmmm.csv` |
+| `--output arquivo.csv` (não existe) | Cria o arquivo com cabeçalho |
+| `--output arquivo.csv` (já existe) | Adiciona linhas ao final, sem repetir o cabeçalho |
+
 ## Architecture
 
 | File | Responsibility |
 |------|---------------|
-| `main.py` | Entry point — validates config, calls scrape, calls exporter |
+| `main.py` | Entry point — validates config, calls scrape, calls exporter; `--output` controls write vs append |
 | `scraper.py` | All browser automation: auth, navigation, filtering, extraction |
-| `exporter.py` | Writes results list to CSV with `utf-8-sig` encoding (Excel-compatible) |
+| `exporter.py` | Writes or appends results to CSV with `utf-8-sig` encoding (Excel-compatible) |
 | `config.py` | Loads `.env` values; single source of truth for constants |
 
 ### Key flows in `scraper.py`
@@ -62,4 +77,6 @@ All selectors that depend on the real HTML are marked with `# AJUSTE` comments i
 
 ## Output
 
-`levantamento_ic5.csv` — columns: `produto`, `risk_completion_date`, `risk_expiration_date`, `risk_responder`, `risk_status`, `access_completion_date`, `access_expiration_date`, `access_responder`, `access_status`.
+CSV gerado via `--output` ou com nome automático `relatorio-YYYYMMDD-HHMMSSmmm.csv`.
+
+Colunas: `nome_aplicacao`, `sigla_app`, `repo`, `url`, `risk_overall_risk`, `risk_responder`, `risk_status`, `risk_completion_date`, `risk_expiration_date`, `access_responder`, `access_status`, `access_completion_date`.
