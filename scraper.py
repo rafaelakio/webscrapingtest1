@@ -324,14 +324,15 @@ def scrape(url: str) -> list[dict]:
                 WebDriverWait(driver, TIMEOUT).until(
                     EC.presence_of_element_located((By.XPATH,
                         "//td[.//strong[contains(normalize-space(),'REPO')"
-                        " or contains(normalize-space(),'Repo')]]"
+                        " or contains(normalize-space(),'Repo')"
+                        " or contains(normalize-space(),'repo')]]"
                     ))
                 )
             except TimeoutException:
                 log.warning("  Campo REPO não carregou dentro do timeout.")
 
             sigla_app = _extract_metadata_field(driver, "Sigla app")
-            repo      = _extract_metadata_field(driver, "REPO", "Repo")
+            repo      = _extract_metadata_field(driver, "REPO", "Repo", "repo")
 
             # AJUSTE: textos exatos dos h3/panel-heading conforme aparecem na tela
             risk = _extract_table_section(
